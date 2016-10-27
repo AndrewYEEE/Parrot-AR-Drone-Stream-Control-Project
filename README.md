@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # AR Drone GPS
 
 Dashboard for controlling a Nodecopter using the Flight Recorder GPS addon
@@ -23,3 +24,7 @@ Dashboard for controlling a Nodecopter using the Flight Recorder GPS addon
 ## Copyright
 
 Copyright (c) 2013 Andrew Nesbitt. See [LICENSE](https://github.com/andrew/ar-drone-gps/blob/master/LICENSE) for details.
+=======
+# Parrot-AR-Drone-Stream-Control-Project
+Parrot AR Drone 飛控專案(配合Hbase、與自行撰寫的手機控制端Android)
+>>>>>>> efa3d6d8137d6587225a0fae9b0a1ef9a2ddd1ae
