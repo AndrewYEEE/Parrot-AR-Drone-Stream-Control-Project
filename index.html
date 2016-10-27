@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>ardrone</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<link rel="stylesheet" href="//code.jquery.com/ui/1.11.2/themes/smoothness/jquery-ui.css">
+<script src="//code.jquery.com/jquery-1.10.2.js"></script>
+<script src="//code.jquery.com/ui/1.11.2/jquery-ui.js"></script>
+
+<style type="text/css" media="screen">
+            button.active{
+              background:red;
+            }
+            body{
+              margin:0;
+              padding:0;
+              height:100%;
+              background:#C3C3C3;
+              color:#fff;
+              font-family: Helvetica, Arial, "MS Trebuchet", sans-serif;
+            }
+            #map, #droneStream{
+              width: 50%;
+              height: 400px;
+              float:left;
+            }
+            #data, #controls{
+              width:40%;
+              float:left;
+              font-size: 130%;
+            }
+            #droneStream canvas{
+              width: 100%;
+              height: 400px;
+            }
+            .section{
+              width:20%;
+              float:left;
+            }
+            .section button{
+              padding:1px;
+              background:#fff;
+              min-width:50px;
+            }
+            #drone-position,#User-position{
+              float:left;
+              width:50%;
+            }
+            .log{
+              clear:both;
+              display:none;
+            }
+            #title{
+              width: 100%;
+              font-size: 100%;
+              text-align: center;
+            }</style>
+<link rel="stylesheet" href="/leaflet.css" />
+
+
+</head>
+<body>
+  
+  <p id="demo"></p>
+
+  <div id="title"><h1>ardrone-control  center</h1></div>
+  
+  <div id="map"></div>
+  
+
+  <div id='controls'>
+          <div class='section'>
+                  <button id='go'>Start Search</button><br />
+                  <button id='reset'>reset</button><br />
+                  <button id='land'>Land</button><br />
+                  <button id='CancelUserControl'>Cancel User Control</button><br />
+          </div>
+          <div class='section'>
+                  <button id='takeoff'>Takeoff</button><br />	
+                  <button id='home'>Return Home</button><br />
+                  <button id='help'>報案</button><br />
+                  <button id='stop'>Stop</button><br />
+          </div>
+          <div class='section'>
+                  <button id='front'>front</button><br />	
+                  <button id='back'>back</button><br />
+                  <button id='left'>left</button><br />
+                  <button id='right'>right</button><br />
+          </div>
+          <div class='section'>
+                  <button id='up'>up</button><br />	
+                  <button id='down'>down</button><br />
+                  <button id='clockwise'>clockwise</button><br />
+                  <button id='counterClockwise'>counterClockwise</button><br />
+          </div>
+  </div>
+  <div id='data'>
+          <div id="User-position">
+                  User-position:
+                  <span class='lat'>0</span>,
+                  <span class='lon'>0</span><br/>
+                  <!--(+/-<span class='accuracy'>0</span>m)-->
+                  User-Command:
+                  <span class='Command'>null</span>
+          </div>
+          <div id="drone-position">
+                  Drone: 
+                  <span class='lat'>0</span>,
+                  <span class='lon'>0</span>
+                  <br/>Distance:
+                        <span class='distance'>0</span>m
+                  <br/>Battery:
+                  <span class='battery'>0</span>%
+                  <br/>ZVE:
+                  <span class='zVe'>0</span>
+          </div>
+          <pre class="log">no data</pre>
+  </div>
+	
+  <!--================================以下是javascript的部分===========================================-->
+
+
+
+  <!--<script src="http://maps.google.com/maps/api/js?v=3.2&sensor=false"></script>-->
+  
+  <script src="leaflet.js"></script>
+  <script src="gamepad-client.js"></script>
+  <script src="gamepad-calibration.js"></script>
+  <script src="leaflet-google.js"></script>
+  <script src="/node-vincenty/vincenty.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  
+  <script>
+
+    var socket = io.connect('/');
+    var lat, lon, map, laptop, drone, phone, phonePath, waypointPath, dronePath, startPosition;
+    var targetLat, targetLon;
+    var waypointMarkers = [];
+    var activeWaypoints = [];
+    var waypoints = [];
+    var follow = false;
+    var UserControlBool=false;
+    var ar_lat=1,ar_lng=1,joker=1,pointcontrol=0,follow_lat,follow_lng,control_5;
+    var User_lat=0,User_lng=0,Drone_lat=0,Drone_lng=0;
+    var flightPlanCoordinates = [],userpointnum=0;
+    var Navigationpoints=[],NavigationNowPoint=0;
+    var LiveBool=true;
+
+    //var labels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    var labels = '123456789';
+    function initMap(){
+                var myLatLng = {lat: User_lat,lng: User_lng};
+                var droneLatlng={lat: Drone_lat,lng: Drone_lng};
+
+                var map = new google.maps.Map(document.getElementById('map'), {
+                zoom: 19,
+                center: myLatLng
+                });
+                var user_image="blue_user_5103.png";
+                var marker = new google.maps.Marker({
+                position: myLatLng,
+                map: map,
+                title: 'User Position',
+                icon:user_image
+                });
+
+                var image="drone_icon.png";
+                var marker = new google.maps.Marker({
+                position: droneLatlng,
+                map: map,
+                title: 'Drone',
+                icon:image
+                });
+                /*
+                var flightPlanCoordinates = [
+                {lat: 37.772, lng: -122.214},
+                {lat: 21.291, lng: -157.821},
+                {lat: -18.142, lng: 178.431},
+                {lat: -27.467, lng: 153.027}
+                ];
+                */
+                var flightPath = new google.maps.Polyline({
+                path: flightPlanCoordinates,
+                geodesic: true,
+                strokeColor: '#FF0000',
+                strokeOpacity: 1.0,
+                strokeWeight: 2
+                });
+
+                flightPath.setMap(map);
+                var key;
+                for(key in flightPlanCoordinates){
+                        //console.log(flightPlanCoordinates[key]);
+                        console.log(flightPlanCoordinates[flightPlanCoordinates.length-1].lat);
+                        if((key==flightPlanCoordinates.length-1)&&(flightPlanCoordinates[0]==flightPlanCoordinates[flightPlanCoordinates.length-1])){ //-1是為了不要劃到最後一個座標，因為第一個座標和最後一個一樣
+                                continue;
+                        }
+                        
+                        var marker = new google.maps.Marker({
+                                position: flightPlanCoordinates[key],
+                                map: map,
+                                title: key+"",
+                                label:labels[key]
+                                //icon:pinSymbol("#FFF")
+                        });
+                }
+
+                function pinSymbol(color) {
+                        return {
+                                path: 'M 0,0 C -2,-20 -10,-22 -10,-30 A 10,10 0 1,1 10,-30 C 10,-22 2,-20 0,0 z M -2,-30 a 2,2 0 1,1 4,0 2,2 0 1,1 -4,0',
+                                fillColor: color,
+                                fillOpacity: 1,
+                                strokeColor: '#000',
+                                strokeWeight: 2,
+                                scale: 1,
+                        };
+                }
+
+
+    }
+
+    
+    //==========================================================
+    function setCurrentTarget(lat, lon){
+            targetLat = lat
+            targetLon = lon
+            socket.emit('go', {lat: targetLat, lon: targetLon})
+            //console.log("Emited socket to go to a certain locationt with coordinates " + targetLat + " and " + targetLon);
+            console.log("Send User GPS Position to Server..........");
+    }
+    
+    function clearCurrentTarget(){
+            targetLat = undefined
+            targetLon = undefined
+            socket.emit('stop')
+    }
+
+
+var myVar = setInterval(function(){  //每3秒執行一次mytimer()
+      myTimer()
+      UserGPSGet()
+      //initMap(User_lat,User_lng);
+      initMap();
+      UserDirectionGet();
+      drone_position_updata();
+}, 2000);
+
+var myVar2 = setInterval(function(){  //每3秒執行一次mytimer()
+      UserControlGet()
+}, 500);
+
+
+ 
+function UserGPSGet(){
+     $(function(){
+          $.ajax({
+                  type:   "POST",
+                  url:    "http://140.125.45.200:2226/hbase/Drone_web/User_GPS_get.jsp", //使用JSONP務必在結尾使用 GET 的 callback=?
+                  dataType:   "json", 
+                  success:  function (data){
+                        console.log("GPS Json Data GET...............");
+                        console.log(data)
+                        console.log("User GPS Position is: "+data[0].Lat+" "+data[0].Lng);
+                        User_lat=parseFloat(data[0].Lat);
+                        User_lng=parseFloat(data[0].Lng);
+                        $('#User-position .lat').text(data[0].Lat)
+                        $('#User-position .lon').text(data[0].Lng)
+
+                  },error:  function (data){
+                        console.log("Can not Get GPS Json Data.......");
+                        console.log(data)
+                  }
+           })
+      });
+}
+
+function UserDirectionGet(){ //接收定點巡航路徑
+     $(function(){
+          $.ajax({
+                  type:   "POST",
+                  url:    "http://140.125.45.200:2226/hbase/Drone_web/auto_Direction_get.jsp", //使用JSONP務必在結尾使用 GET 的 callback=?
+                  dataType:   "json",
+                  success:  function (data){
+                        flightPlanCoordinates=[];
+                        console.log("Direction Json Data GET...............");
+                        //console.log(data[1][0].Lat);
+                        userpointnum=parseInt(data[0].value);
+                        for(var i=1;i<=userpointnum;i++){ //從1開始只是因為傳過來的json資料座標是從元素1開始排的，元素0是數量value
+                                var object=new Object();
+                                object.lat=parseFloat(data[i][0].Lat);
+                                object.lng=parseFloat(data[i][0].Lng);
+                                flightPlanCoordinates[i-1]=object;
+                        }
+                        console.log(flightPlanCoordinates);
+                  },error:  function (data){
+                        console.log("Can not Get Direction Json Data.......");
+                        console.log(data)
+                  }
+           })
+      });
+
+}
+function drone_position_updata(){  //用於將drone現在的位置傳到hbase上
+        $.ajax({
+                url: 'http://140.125.45.200:2226/hbase/Drone_web/Drone_position_update.jsp',
+                type: 'GET',
+                data: {
+                        droneLat:Drone_lat,
+                        droneLng:Drone_lng
+                },
+                error: function(xhr) {
+                        console.log('Ajax request 發生錯誤');
+                },
+                success: function(response) {
+                        console.log("drone position updata successful!");
+                
+                }
+        });
+};
+
+
+var AR_RED_Lat=23.6954582,AR_RED_Lng=120.5368597; //紀錄AR紅區觸發地點
+var Drone_Station_Lat=23.6954582,Drone_Station_Lng=120.5368597; //紀錄這個飛行停靠站的經緯度
+var AR_RED_Drone_Not_Return=true; //用來判斷飛機是否已經飛到AR定點，若有擇設成false讓drone飛回來
+function UserControlGet(){
+     $(function(){
+          $.ajax({
+                  type:     "POST",
+                  url:    "http://140.125.45.200:2226/hbase/Drone_web/User_Control_Get.jsp", //使用JSONP務必在結尾使用 GET 的 callback=?
+                  dataType:   "json", 
+                  success:  function (data){
+                        console.log("Control Json Data GET...............");
+                        //console.log(data)
+                        //console.log("User Command is: "+data[0].Command);
+                        $('#User-position .Command').text(data[0].Command);
+
+                        if(data[0].Command=="Terminal"){
+                                if(UserControlBool){
+                                        UserControlBool=false;
+                                }
+                                
+                        }else if(data[0].Command=="Start"){
+                                UserControlBool=true;
+                                AR_static=false;
+                                LiveBool=true;
+                                AR_RED_Drone_Not_Return=true;
+                        }else if(data[0].Command=="Emergency"){ //收到AR的紅區警告動作
+                                AR_static=true; //指AR紅區事件觸發，將觸發畫在googleMap上
+                                var bearing = distVincenty(Drone_lat, Drone_lng, AR_RED_Lat, AR_RED_Lng)
+                                                if(bearing.distance>1&&AR_RED_Drone_Not_Return){ //畔對drone是否飛到AR點以及是否還沒要返回
+                                                       setCurrentTarget(AR_RED_Lat, AR_RED_Lng);
+                                                }else{
+                                                       setCurrentTarget(Drone_Station_Lat, Drone_Station_Lng);
+                                                       AR_RED_Drone_Return=false;
+                                                }
+
+                        }
+
+                        if((Navigationpoints!=flightPlanCoordinates)&&(data[0].Command!="startNavigation")){ 
+                                //使用者下令"startnavigation"即為開始執行定點巡航
+                                //此設計為:當使用者在沒有下令開始定點巡航的指令情形下，而且暫存的定點
+                                //巡航點的群集Navigationpoints與現在從資料庫取回來的定點群集不同，才
+                                //允許更新暫存的Navigationpoints，因為如果不這樣做，在定點巡航正在執
+                                //行的時候使用者突然更改定點群集，會導致程式錯亂。
+                                Navigationpoints=flightPlanCoordinates; 
+                                NavigationNowPoint=0;   
+                        }
+                        
+                        if(UserControlBool){
+                                if(data[0].Command=="Up"){
+                                        console.log("User Command: Up");
+                                        socket.emit('up')
+                                }else if(data[0].Command=="Down"){
+                                        console.log("User Command: Down");
+                                        socket.emit('down')
+
+                                }else if(data[0].Command=="Front"){
+                                        console.log("User Command: Front");
+                                        socket.emit('front')
+
+                                }else if(data[0].Command=="Back"){
+                                        console.log("User Command: Back");
+                                        socket.emit('back')
+                                        
+                                }else if(data[0].Command=="Left"){
+                                        console.log("User Command: Left");
+                                        socket.emit('left')
+                                        
+                                }else if(data[0].Command=="Right"){
+                                        console.log("User Command: Right");
+                                        socket.emit('right')
+                                        
+                                }else if(data[0].Command=="Land"){
+                                        console.log("User Command: Land");
+                                        socket.emit('land')
+                                        
+                                }else if(data[0].Command=="Clockwise"){
+                                        console.log("User Command: Clockwise");
+                                        socket.emit('clockwise')
+                                        
+                                }else if(data[0].Command=="counterClockwise"){
+                                        console.log("User Command: counterClockwise");
+                                        socket.emit('counterClockwise')
+                                }else if(data[0].Command=="Reset"){
+                                        console.log("User Command: reset");
+                                        socket.emit('reset')
+                                        
+                                }else if(data[0].Command=="GO"){
+                                        console.log("User Command: GO");
+                                        setCurrentTarget(User_lat,User_lng);
+                                        
+                                }else if(data[0].Command=="Takeoff"){
+                                        console.log("User Command: Takeoff");
+                                        socket.emit('takeoff');
+                                        
+                                }else if(data[0].Command=="startNavigation"){
+                                        //若drone現在的位址與目前所在定點巡航群集中的某個點距離超過1m
+                                        //，則設定現在前往的目標是這個"某點"，然後如同"go"指令，將drone
+                                        //要飛向的目標(那個"某點")設定給函式setCurrentTarget，然後讓
+                                        //drone飛向那裡；若drone現在的位置距離那個"某點"小於1m，則以
+                                        //continue的方式自動將index+1，然後再判斷下一個"某點"是否與drone
+                                        //距離小於1m。直到到達最後一個點時，顯示Console.log的東西，以示
+                                        //已經完成。
+                                        var i;
+                                        for(i=NavigationNowPoint;i<Navigationpoints.length;i++){ 
+                                                var bearing = distVincenty(Drone_lat, Drone_lng, Navigationpoints[i].lat, Navigationpoints[i].lng)
+                                                if(bearing.distance<1){
+                                                        if(i==Navigationpoints.length-1){
+                                                                console.log("Navigation Successful arrive the goal.");
+                                                                break;
+                                                        }
+                                                        continue;
+                                                }else{
+                                                        NavigationNowPoint=i;
+                                                        setCurrentTarget(Navigationpoints[i].lat, Navigationpoints[i].lng);
+                                                        break;
+                                                }
+                                        }
+                                        
+                                        
+                                }else if(data[0].Command=="stopNavigation"){
+                                        NavigationNowPoint=0; //重設暫存點
+                                }else if(data[0].Command=="LiveStart"){
+                                        if(LiveBool){
+                                                console.log("User Command: LiveStart");
+                                                socket.emit('Live');
+                                        }
+                                        LiveBool=false;
+                                        
+                                }
+
+                        }else{                          
+                                return;
+                        }
+
+
+                  },error:  function (data){
+                        console.log("Can not Get Control Json Data.......");
+                        console.log(data)
+                  }
+           })
+      });
+
+}
+
+var AR_static=false;
+
+function ARStatusGet(){
+     $(function(){
+          $.ajax({
+                  type:   "POST",
+                  url:    "http://140.125.45.200:2226/hbase/Drone_web/AR_Status_get.jsp", //使用JSONP務必在結尾使用 GET 的 callback=?
+                  dataType:   "json", 
+                  success:  function (data){
+                        console.log("AR Json Data GET...............");
+                        console.log("User GPS Position is: "+data.Lat+" "+data.Lng);
+                        AR_RED_lat=parseFloat(data.Lat);
+                        AR_RED_lng=parseFloat(data.Lng);
+                        $('#User-position .lat').text(data[0].Lat)
+                        $('#User-position .lon').text(data[0].Lng)
+
+                  },error:  function (data){
+                        console.log("Can not Get GPS Json Data.......");
+                        console.log(data)
+                  }
+           })
+      });
+}
+
+function myTimer() {
+    var d = new Date();
+    var t = d.toLocaleTimeString();
+    document.getElementById("demo").innerHTML = t;
+}
+
+
+
+     $(function(){
+                   $('#CancelUserControl').click(function(){
+                            console.log("Cancel User Control Command Operated!!");
+                            UserControlBool=false;
+                            socket.emit('stop')         
+                  })
+                  $('#takeoff').click(function(){
+                            console.log("takeoff Command Operated!!");
+                            socket.emit('takeoff')
+                  })
+                  $('#land').click(function(){
+                            console.log("land Command Operated!!");
+                            follow = false
+                            socket.emit('land')
+                            //startPosition = []
+                  })
+                  $('#reset').click(function(){
+                            console.log("reset Command Operated!!");
+                            follow = false
+                            //clearWaypoints()
+                            socket.emit('reset')
+                  })
+                  $('#stop').click(function(){
+                            console.log("stop Command Operated!!");
+                            follow = false
+                            socket.emit('stop')
+                            //clearCurrentTarget()
+                  })
+                  $('#clear').click(function(){
+                            console.log("clear Command Operated!!");
+                            follow = false
+                            //clearWaypoints()
+                  })
+                  $('#home').click(function(){
+                            console.log("takeohomeff Command Operated!!");
+                            follow = false
+                            //activeWaypoints = [startPosition[0], startPosition[1]]
+                            //setCurrentTarget(startPosition[0], startPosition[1]) //執行setCurrentTarget函式(在上面)
+                  })
+                  $('#help').click(function(){
+                            console.log("help Command Operated!!");
+                            //socket.emit('help',1)
+                  })
+                  $('#go').click(function(){
+                            console.log("go Command Operated!!");
+                            follow = false	 
+                            /*
+                            //Start flying grid
+                            console.log("Recevied go socket event");
+                            if(waypoints.length > 0){
+                                        //console.log("waypoints.length > 0 hit !");
+                                        activeWaypoints = waypoints.slice(0);
+                                        //console.log (waypoints.slice(0));
+                                        // go to next waypoint
+                                        setCurrentTarget(activeWaypoints[0][0], activeWaypoints[0][1]) //執行setCurrentTarget函式(在上面)
+                            }*/
+                            setCurrentTarget(User_lat,User_lng);
+              
+                  })
+                  $('#follow').click(function(){
+                            follow = true
+                  })
+                  $('#manual').click(function(){
+                            follow = false
+                            clearCurrentTarget()
+                            nodecopterGamepad.initGamepad(socket);
+                  })
+                  $('#front').click(function(){
+                            console.log("front Command Operated!!");
+                            socket.emit('front')
+                  })
+                  $('#back').click(function(){
+                            console.log("back Command Operated!!");
+                            socket.emit('back')
+                  })
+                  $('#left').click(function(){
+                            console.log("left Command Operated!!");
+                            socket.emit('left')
+                  })
+                  $('#right').click(function(){
+                            console.log("right Command Operated!!");
+                            socket.emit('right')
+                  })
+                  $('#up').click(function(){
+                            console.log("up Command Operated!!");
+                            socket.emit('up')
+                  })
+                  $('#down').click(function(){
+                            console.log("down Command Operated!!");
+                            socket.emit('down')
+                  })
+                  $('#clockwise').click(function(){
+                            console.log("clockwise Command Operated!!");
+                            socket.emit('clockwise')
+                  })
+                  $('#counterClockwise').click(function(){
+                            console.log("counterClockwise Command Operated!!");
+                            socket.emit('counterClockwise')
+                  })
+     })
+
+     socket.on('connect', function(){
+                  /*
+                  socket.on('waypointReached', function(data){
+                                activeWaypoints.shift()
+                                if(pointcontrol==1)
+                                {
+                                        socket.emit('land')
+                                        startPosition = []
+                                }
+                                else if(pointcontrol == 2)
+                                {
+                                        setCurrentTarget(follow_lat,follow_lng)
+                                }
+                                else if(activeWaypoints.length > 0 && pointcontrol==0){
+                                        // go to next waypoint
+                                        setCurrentTarget(activeWaypoints[0][0], activeWaypoints[0][1])
+                                }
+                  })*/
+                  socket.on('drone', function(data){  //解析server丟過來的drone資料
+                              console.log("GET Drone Data!!");
+                              
+                              if(data.battery != undefined){
+                                        console.log("Drone Data Not NuLL !!");
+                                        /*GoogleMap部分
+                                        if (drone == null){
+                                                  drone = L.marker([data.lat, data.lon], {icon: droneIcon}).addTo(map)
+                                                  dronePath = L.polyline([[data.lat, data.lon]], {color: 'green'}).addTo(map);
+                                        } else{
+                                                  drone.setLatLng([data.lat, data.lon])
+                                                  dronePath.addLatLng([data.lat, data.lon])
+                                        }
+                                        */
+                                        if((User_lat!=0&&User_lng!=0&&Drone_lat!=0&&Drone_lng!=0)){
+                                                
+                                                var bearing = distVincenty(Drone_lat, Drone_lng, User_lat, User_lng)
+                                                $('#drone-position .distance').text(bearing.distance);
+                                        }
+                                        Drone_lat=parseFloat(data.lat);
+                                        Drone_lng=parseFloat(data.lon);
+                                        $('#drone-position .battery').text(data.battery)
+                                        $('#drone-position .lat').text(data.lat)
+                                        $('#drone-position .lon').text(data.lon)
+                                        $('#drone-position .distance').text(data.distance)
+                                    
+                                        $('#drone-position .zVe').text(data.z)
+                              }
+                  })
+
+    })
+
+  function distVincenty(lat1, lon1, lat2, lon2, callback) {
+                var a = 6378137,
+                    b = 6356752.314245,
+                    f = 1 / 298.257223563;  // WGS-84 ellipsoid params
+
+                var L = toRad(( lon2 - lon1 ));
+                var U1 = Math.atan(( 1 - f ) * Math.tan( toRad(lat1) ));
+                var U2 = Math.atan(( 1 - f ) * Math.tan( toRad(lat2) ));
+                var sinU1 = Math.sin(U1), cosU1 = Math.cos(U1);
+                var sinU2 = Math.sin(U2), cosU2 = Math.cos(U2);
+
+                var lambda = L, lambdaP, iterLimit = 100;
+                do {
+                        var sinLambda = Math.sin(lambda), cosLambda = Math.cos(lambda);
+                        var sinSigma = Math.sqrt((cosU2*sinLambda) * (cosU2*sinLambda) +
+                        (cosU1*sinU2-sinU1*cosU2*cosLambda) * (cosU1*sinU2-sinU1*cosU2*cosLambda));
+                        if (sinSigma==0) {
+                        var result = { distance: 0, initialBearing: 0, finalBearing: 0 };
+                        if (callback !== undefined && callback instanceof Function) {
+                                if (callback.length === 3) {
+                                callback(result.distance, result.initialBearing, result.finalBearing);
+                                }
+                                else {
+                                callback(result.distance);
+                                }
+                        }
+                        return result;
+                        };  // co-incident points
+                        var cosSigma = sinU1*sinU2 + cosU1*cosU2*cosLambda;
+                        var sigma = Math.atan2(sinSigma, cosSigma);
+                        var sinAlpha = cosU1 * cosU2 * sinLambda / sinSigma;
+                        var cosSqAlpha = 1 - sinAlpha*sinAlpha;
+                        var cos2SigmaM = cosSigma - 2*sinU1*sinU2/cosSqAlpha;
+                        if (isNaN(cos2SigmaM)) cos2SigmaM = 0;  // equatorial line: cosSqAlpha=0 (§6)
+                        var C = f/16*cosSqAlpha*(4+f*(4-3*cosSqAlpha));
+                        lambdaP = lambda;
+                        lambda = L + (1-C) * f * sinAlpha *
+                        (sigma + C*sinSigma*(cos2SigmaM+C*cosSigma*(-1+2*cos2SigmaM*cos2SigmaM)));
+                } while (Math.abs(lambda-lambdaP) > 1e-12 && --iterLimit>0);
+
+                if (iterLimit==0) return NaN  // formula failed to converge
+
+                var uSq = cosSqAlpha * (a*a - b*b) / (b*b);
+                var A = 1 + uSq/16384*(4096+uSq*(-768+uSq*(320-175*uSq)));
+                var B = uSq/1024 * (256+uSq*(-128+uSq*(74-47*uSq)));
+                var deltaSigma = B*sinSigma*(cos2SigmaM+B/4*(cosSigma*(-1+2*cos2SigmaM*cos2SigmaM)-B/6*cos2SigmaM*(-3+4*sinSigma*sinSigma)*(-3+4*cos2SigmaM*cos2SigmaM)));
+                var s = b*A*(sigma-deltaSigma);
+
+                s = Number(s.toFixed(3)); // round to 1mm precision
+
+                // note: to return initial/final bearings in addition to distance, use something like:
+                var fwdAz = Math.atan2(cosU2*sinLambda,  cosU1*sinU2-sinU1*cosU2*cosLambda);
+                var revAz = Math.atan2(cosU1*sinLambda, -sinU1*cosU2+cosU1*sinU2*cosLambda);
+                var result = { distance: s, initialBearing: toDeg(fwdAz), finalBearing: toDeg(revAz) };
+
+                if (callback !== undefined && callback instanceof Function) {
+                        if (callback.length === 3) {
+                                callback(result.distance, result.initialBearing, result.finalBearing);
+                        }
+                        else {
+                                callback(result.distance);
+                        }
+                }
+
+                return result;
+}
+function destVincenty(lat1, lon1, brng, dist, callback) {
+        var a = 6378137, b = 6356752.3142,  f = 1/298.257223563;  // WGS-84 ellipsiod
+        var s = dist;
+        var alpha1 = toRad(brng);
+        var sinAlpha1 = Math.sin(alpha1);
+        var cosAlpha1 = Math.cos(alpha1);
+
+        var tanU1 = (1-f) * Math.tan(toRad(lat1));
+        var cosU1 = 1 / Math.sqrt((1 + tanU1*tanU1)), sinU1 = tanU1*cosU1;
+        var sigma1 = Math.atan2(tanU1, cosAlpha1);
+        var sinAlpha = cosU1 * sinAlpha1;
+        var cosSqAlpha = 1 - sinAlpha*sinAlpha;
+        var uSq = cosSqAlpha * (a*a - b*b) / (b*b);
+        var A = 1 + uSq/16384*(4096+uSq*(-768+uSq*(320-175*uSq)));
+        var B = uSq/1024 * (256+uSq*(-128+uSq*(74-47*uSq)));
+
+        var sigma = s / (b*A), sigmaP = 2*Math.PI;
+        while (Math.abs(sigma-sigmaP) > 1e-12) {
+                var cos2SigmaM = Math.cos(2*sigma1 + sigma);
+                var sinSigma = Math.sin(sigma);
+                var cosSigma = Math.cos(sigma);
+                var deltaSigma = B*sinSigma*(cos2SigmaM+B/4*(cosSigma*(-1+2*cos2SigmaM*cos2SigmaM)-B/6*cos2SigmaM*(-3+4*sinSigma*sinSigma)*(-3+4*cos2SigmaM*cos2SigmaM)));
+                sigmaP = sigma;
+                sigma = s / (b*A) + deltaSigma;
+        }
+
+        var tmp = sinU1*sinSigma - cosU1*cosSigma*cosAlpha1;
+        var lat2 = Math.atan2(sinU1*cosSigma + cosU1*sinSigma*cosAlpha1,(1-f)*Math.sqrt(sinAlpha*sinAlpha + tmp*tmp));
+        var lambda = Math.atan2(sinSigma*sinAlpha1, cosU1*cosSigma - sinU1*sinSigma*cosAlpha1);
+        var C = f/16*cosSqAlpha*(4+f*(4-3*cosSqAlpha));
+        var L = lambda - (1-C) * f * sinAlpha *(sigma + C*sinSigma*(cos2SigmaM+C*cosSigma*(-1+2*cos2SigmaM*cos2SigmaM)));
+        var lon2 = (toRad(lon1)+L+3*Math.PI)%(2*Math.PI) - Math.PI;  // normalise to -180...+180
+
+        var revAz = Math.atan2(sinAlpha, -tmp);  // final bearing, if required
+
+        var result = { lat: toDeg(lat2), lon: toDeg(lon2), finalBearing: toDeg(revAz) };
+
+        if (callback !== undefined && callback instanceof Function) {
+                if (callback.length === 3) {
+                        callback(result.lat, result.lon, result.finalBearing);
+                }
+                else {
+                        callback(result);
+                }
+        }
+
+        return result;
+}
+function toRad(Value) {
+  /** Converts numeric degrees to radians */
+  return Value * Math.PI / 180;
+}
+
+function toDeg(Value) {
+  /** Converts radians to numeric degrees */
+  return Value * 180 / Math.PI;
+}
+  </script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCHdRzAAs0g5N04lR5AUvgrZ1VBmmuUIP4&callback=initMap" async defer></script>
+</body>
+</html>

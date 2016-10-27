@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>ardrone_Stream</title>
+<link rel="stylesheet" href="/leaflet.css" />
+</head>
+    <body>
+        <script src="leaflet.js"></script>
+        <script src="gamepad-client.js"></script>
+        <script src="gamepad-calibration.js"></script>
+        <script src="leaflet-google.js"></script>
+        <script src="/dronestream/nodecopter-client.js"></script>
+        <script src="/dronestream/vincenty.js""></script>
+        <script src="jquery.js"></script>
+        <script src="/socket.io/socket.io.js"></script>
+        <div id='droneStream'></div>
+        <img src="localhost:8000" />
+        <script>
+            new NodecopterStream(document.getElementById("droneStream"));
+            var socket = io.connect('/');
+            socket.on('drone', function(data){
+                if(data != undefined){
+                    
+                }
+            })
+        </script>
+    </body>
+</html>
