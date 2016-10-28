@@ -11,6 +11,8 @@ Parrot AR Drone 飛控專案(配合Hbase、與自行撰寫的手機控制端Andr
 
 作品展示:
 
+![show](/show1.jpg)
+
 重要檔案:
 
 redj.js: nodejscode，是用來運行server端程式，使用socketio連結前端
